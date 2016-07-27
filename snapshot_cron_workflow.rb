@@ -15,21 +15,27 @@ class SnapshotCronWorkflow
   activity_client(:client) { { from_class: "SnapshotCronActivity" } }
 
   def run_snapshot()
+    # get ec2 list
     on_demand, spot = client.get_active_ec2_list()
 
-    if !demand.empty? then
-        demand.each{|i|
-          client.stop_ec2(i)
-          client.create_ami(i,true)
-          client.start_ec2(i)
-        }
+    # for spot
+    result_spot = false
+    result_spot = client.create_ami_spot(spot)
+    if result_spot then 
+      puts "spot instances operations finished !!"
+    else
+      puts "spot instances not exist"
     end
 
-    if !spot.empty? then
-        spot.each{|i|
-          client.create_ami(i,false)
-        }
+    # for on demand
+    result_on_demand = false
+    result_on_demand = client.create_ami_on_demand(on_demand)
+    if result_on_demand then 
+      puts "on demand instances operations finished !!"
+    else
+      puts "on demand instances not exist"
     end
+
   end
 end
 
