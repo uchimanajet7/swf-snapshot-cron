@@ -1,45 +1,66 @@
-require 'aws-sdk-core'
+require 'aws-sdk-v1'
 require 'aws/decider'
+require 'inifile'
+require 'pathname'
 
 class SnapshotCronUtils
   WF_VERSION = "1.0"
   ACTIVITY_VERSION = "1.0"
   WF_TASK_LIST = "sc_workflow_task_list"
   ACTIVITY_TASK_LIST = "sc_activity_task_list"
-  DOMAIN = "SnapshotCron_7141535"
-  Aws.config[:region] = 'ap-northeast-1'
+  DOMAIN = "SnapshotCron"
 
-  def initialize
-    # create swf client
-    @swf_client = Aws::SWF::Client.new
-
-    # try register new domain
+  # get inifile value
+  def get_ini_value(inifile, section, name)
     begin
-      resp = @swf_client.register_domain({
-        name: DOMAIN,
-        workflow_execution_retention_period_in_days: "10",
-        })
+      return inifile[section][name]
     rescue => e
-      p e
+      return "error: could not read #{name}"
     end
-    
-    # get domain info
-    resp = @swf_client.describe_domain({name: DOMAIN,})
-    @domain = resp.domain_info
+  end
 
-    p @domain
+  def initialize(profile="default")
+    # load ~/.aws inifiles
+    aws_path = Pathname.new("~/.aws")
+
+    # load config
+    config_path = aws_path + "config"
+    config_ini = IniFile.load(config_path.expand_path)
+    region = get_ini_value(config_ini, profile, "region")
+
+    # load credentials
+    credentials_path = aws_path + "credentials"
+    credentials_ini = IniFile.load(credentials_path.expand_path)
+    aws_id = get_ini_value(credentials_ini, profile, "aws_access_key_id")
+    aws_key = get_ini_value(credentials_ini, profile, "aws_secret_access_key")
+
+    # set aws config
+    AWS.config({
+      :access_key_id => aws_id,
+      :secret_access_key => aws_key,
+      :region => region,
+    })
+
+    # create swf client
+    swf_client = AWS::SimpleWorkflow.new
+
+    # get domain 
+    @domain = swf_client.domains[DOMAIN]
+    unless @domain.exists?
+      @domain = swf_client.domains.create(DOMAIN, 10)
+    end
   end
 
   def activity_worker(klass)
-    AWS::Flow::ActivityWorker.new(@swf_client, @domain, ACTIVITY_TASK_LIST, klass)
+    AWS::Flow::ActivityWorker.new(@domain.client, @domain, ACTIVITY_TASK_LIST, klass)
   end
 
   def workflow_worker(klass)
-    AWS::Flow::WorkflowWorker.new(@swf_client, @domain, WF_TASK_LIST, klass)
+    AWS::Flow::WorkflowWorker.new(@domain.client, @domain, WF_TASK_LIST, klass)
   end
 
   def workflow_client(klass)
-    AWS::Flow::workflow_client(@swf_client, @domain) { { from_class: klass.name } }
+    AWS::Flow::workflow_client(@domain.client, @domain) { { from_class: klass.name } }
   end
-
+  
 end
